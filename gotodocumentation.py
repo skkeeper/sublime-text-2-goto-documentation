@@ -69,7 +69,17 @@ class GotoDocumentationCommand(sublime_plugin.TextCommand):
                 scope = self.view.scope_name(word.begin()).strip()
                 extracted_scope = scope.rpartition('.')[2]
                 keyword = self.view.substr(word)
-                getattr(self, '%s_doc' % extracted_scope, self.unsupported)(keyword, scope)
+                if ('%s_doc' % extracted_scope != 'js_doc'):
+                    getattr(self, '%s_doc' % extracted_scope, self.unsupported)(keyword, scope)
+                else:
+                    # If the scope is JS we inspect for common used
+                    # libraries such as JQuery and Dojo
+                    js_lib = self.detect_js_library(region, 32)
+                    if not (js_lib):
+                        self.js_doc(keyword, scope)
+                    else:
+                        getattr(self, '%s_doc' % js_lib, \
+                            self.unsupported)(keyword)
 
     def unsupported(self, keyword, scope):
         sublime.status_message("This scope is not supported: %s" % scope.rpartition('.')[2])
@@ -110,6 +120,12 @@ class GotoDocumentationCommand(sublime_plugin.TextCommand):
     def smarty_doc(self, keyword, scope):
         open_url('http://www.smarty.net/%s' % keyword)
 
+    def jquery_doc(self, keyword):
+        open_url('http://api.jquery.com/%s' % keyword)
+
+    def dojo_doc(self, keyword):
+        open_url('http://dojotoolkit.org/api/dojo.%s' % keyword)
+
     def run_command(self, command, callback=None, **kwargs):
         if not callback:
             callback = self.display_output
@@ -127,3 +143,41 @@ class GotoDocumentationCommand(sublime_plugin.TextCommand):
         self.output_view.end_edit(edit)
         self.output_view.set_read_only(True)
         sublime.active_window().run_command("show_panel", {"panel": "output.gotodocumentation"})
+
+    def detect_js_library(self, region, max_backreference):
+        """Returns a string with the name of the JS library detected
+
+        param view refers to the current view of the editor, we need
+        this for context (not just the keyword)
+        param max_backreference refers to the max characters will go
+        back to look for a reference to a library. This should be
+        deprecated soon and replaced with scope detection
+        """
+        lib = None
+        sel_word = self.view.word(region)
+        pre_sel_word = sublime.Region(sel_word.a - 2, sel_word.a - 1)
+        pre_string = self.view.substr(pre_sel_word)
+        if(pre_string == '$'):
+            # Found jquery
+            lib = 'jquery'
+        if(pre_string == 'o'):
+            # It's probably dojo, lets check it out!
+            region = sublime.Region(pre_sel_word.a - 3, pre_sel_word.b)
+            if(self.view.substr(region) == 'dojo'):
+                lib = 'dojo'
+        if(pre_string == ')'):
+            # Probably a Jquery selector, lets make sure
+            for i in range(1, max_backreference):
+                region = sublime.Region(pre_sel_word.a - i, \
+                    pre_sel_word.a - (i + 1))
+                if(self.view.substr(region) == '('):
+                    # Found the beggining of the selector
+                    region = sublime.Region(region.a - 1, \
+                        region.b - 1)
+                    if(self.view.substr(region) == '$'):
+                        lib = 'jquery'
+                    break
+        if(lib != None):
+            return lib
+        else:
+            return False
